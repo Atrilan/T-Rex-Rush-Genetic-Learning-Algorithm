@@ -1,10 +1,27 @@
 __author__ = "Shivam Shekhar"
 
+import warnings
+warnings.filterwarnings('ignore',category=FutureWarning)
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import sys
 import pygame
 import random
 from pygame import *
+import tensorflow as tf  
+import numpy as np
+import neat
+
+sess = tf.compat.v1.InteractiveSession()
+
+weight_initer = tf.truncated_normal_initializer(mean=0.0, stddev=1)
+
+model = tf.keras.models.Sequential([
+        tf.keras.layers.InputLayer(input_shape=(10,)),
+        tf.keras.layers.Dense(5, activation='relu', kernel_initializer=weight_initer, bias_initializer=tf.ones_initializer()),
+        tf.keras.layers.Dense(2, activation='softmax', kernel_initializer=weight_initer, bias_initializer=tf.ones_initializer())
+])
+
 
 pygame.mixer.pre_init(44100, -16, 2, 2048) # fix audio delay 
 pygame.init()
@@ -332,6 +349,7 @@ def introscreen():
                 screen.blit(logo,logo_rect)
                 screen.blit(callout,callout_rect)
             temp_dino.draw()
+        
 
             pygame.display.update()
 
@@ -341,6 +359,8 @@ def introscreen():
 
 def gameplay():
     global high_score
+    global gamespeed
+    global gameOver
     gamespeed = 4
     startMenu = False
     gameOver = False
@@ -360,6 +380,20 @@ def gameplay():
     Ptera.containers = pteras
     Cloud.containers = clouds
 
+    cacti_left = 0
+    cacti_right = 0
+    cacti_top = 0
+    pteras_left = 0
+    pteras_right = 0
+    pteras_top = 0
+    pteras_bottom = 0
+    obstacle_right = 0
+    jump_height = 0
+    speed = 0
+    timer = 0
+    jump_height = playerDino.rect.bottom
+    speed = gamespeed
+
     retbutton_image,retbutton_rect = load_image('replay_button.png',35,31,-1)
     gameover_image,gameover_rect = load_image('game_over.png',190,11,-1)
 
@@ -377,6 +411,7 @@ def gameplay():
         while startMenu:
             pass
         while not gameOver:
+            timer = timer + 1
             if pygame.display.get_surface() == None:
                 print("Couldn't load display surface")
                 gameQuit = True
@@ -404,6 +439,9 @@ def gameplay():
                             playerDino.isDucking = False
             for c in cacti:
                 c.movement[0] = -1*gamespeed
+                cacti_left = c.rect.left
+                cacti_right = c.rect.right
+                cacti_top = c.rect.top
                 if pygame.sprite.collide_mask(playerDino,c):
                     playerDino.isDead = True
                     if pygame.mixer.get_init() != None:
@@ -411,10 +449,17 @@ def gameplay():
 
             for p in pteras:
                 p.movement[0] = -1*gamespeed
+                pteras_left = p.rect.left
+                pteras_right = p.rect.right
+                pteras_top = p.rect.top
+                pteras_bottom = p.rect.bottom
                 if pygame.sprite.collide_mask(playerDino,p):
                     playerDino.isDead = True
                     if pygame.mixer.get_init() != None:
                         die_sound.play()
+
+            for l in last_obstacle:
+                obstacle_right = l.rect.right
 
             if len(cacti) < 2:
                 if len(cacti) == 0:
@@ -468,13 +513,47 @@ def gameplay():
                 gamespeed += 1
 
             counter = (counter + 1)
+            
+            if playerDino.rect.bottom == 147 and timer >= 0:
+                input_array = np.array([[jump_height,speed,cacti_left,cacti_right,cacti_top,pteras_left,pteras_right,pteras_top,pteras_bottom,obstacle_right]])
 
+                output = model.predict(input_array)
+                rounded_output = tf.round(output)
+                eval_output = rounded_output.eval()
+                indexes=(tf.argmax(output, axis=1))
+                eval_indexes = indexes.eval()
+
+                print(eval_output)
+                print(eval_indexes)
+                
+                #playerDino.isDucking = False
+
+                if not np.any(eval_output):
+                    print("this man be waitin")
+                    timer = -20
+                    pass
+                elif eval_indexes == 0:
+                    print("this man be jumpin")
+                    if playerDino.rect.bottom == int(0.98*height):
+                        playerDino.isJumping = True
+                        if pygame.mixer.get_init() != None:
+                            jump_sound.play()
+                        playerDino.movement[1] = -1*playerDino.jumpSpeed
+                        timer = -38
+                elif eval_indexes == 1:
+                    print("this man be crouchin")
+                    if not (playerDino.isJumping and playerDino.isDead):
+                        playerDino.isDucking = True
+                        timer = -10
+            
         if gameQuit:
             break
 
-        while gameOver:
+        while gameOver: 
+            gameOver = False
+            gameplay()
             if pygame.display.get_surface() == None:
-                print("Couldn't load display surface")
+                #print("Couldn't load display surface")
                 gameQuit = True
                 gameOver = False
             else:
